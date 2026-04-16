@@ -29,12 +29,18 @@
         <div class="avatar">{{ msg.role === 'user' ? '🧑' : '🤖' }}</div>
         <div class="bubble" v-html="renderMarkdown(msg.content)"></div>
       </div>
-      <div v-if="loading" class="message assistant">
+      <!-- 流式输出中的消息 -->
+      <div v-if="streamingContent !== null" class="message assistant">
         <div class="avatar">🤖</div>
-        <div class="bubble typing">
-          <span></span><span></span><span></span>
-        </div>
+        <div class="bubble" v-html="renderMarkdown(streamingContent || ' ')"></div>
       </div>
+      <!-- 等待第一个 token（纯 loading 点） -->
+      <div v-else-if="loading" class="message assistant">
+        <div class="avatar">🤖</div>
+        <div class="bubble typing"><span></span><span></span><span></span></div>
+      </div>
+      <!-- 查询排期提示 -->
+      <div v-if="toolHint" class="tool-hint">{{ toolHint }}</div>
     </div>
 
     <!-- 输入区域 -->
@@ -64,12 +70,13 @@
 import { ref, nextTick, onMounted } from 'vue'
 import { marked } from 'marked'
 
-// 动态获取后端地址，手机访问时自动使用当前 IP
 const API_BASE = `${window.location.protocol}//${window.location.hostname}:8000`
 
 const messages = ref([])
 const inputText = ref('')
 const loading = ref(false)
+const streamingContent = ref(null)   // null = 不在流式中，string = 流式累积内容
+const toolHint = ref('')
 const sessionId = ref(null)
 const messagesRef = ref(null)
 const textareaRef = ref(null)
@@ -119,28 +126,79 @@ async function sendMessage() {
   messages.value.push({ role: 'user', content: text })
   inputText.value = ''
   loading.value = true
+  streamingContent.value = null
+  toolHint.value = ''
 
   await nextTick()
   if (textareaRef.value) textareaRef.value.style.height = 'auto'
   scrollToBottom()
 
   try {
-    const res = await fetch(`${API_BASE}/api/chat`, {
+    const res = await fetch(`${API_BASE}/api/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId.value, message: text }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    sessionId.value = data.session_id
-    messages.value.push({ role: 'assistant', content: data.reply })
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() // 保留不完整的行
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const raw = line.slice(6).trim()
+        if (!raw) continue
+
+        let event
+        try { event = JSON.parse(raw) } catch { continue }
+
+        if (event.type === 'session') {
+          sessionId.value = event.session_id
+
+        } else if (event.type === 'token') {
+          if (streamingContent.value === null) streamingContent.value = ''
+          streamingContent.value += event.content
+          toolHint.value = ''
+          scrollToBottom()
+
+        } else if (event.type === 'tool_start') {
+          toolHint.value = '⏳ ' + event.message
+          scrollToBottom()
+
+        } else if (event.type === 'done') {
+          // 把流式内容转为正式消息
+          if (streamingContent.value !== null) {
+            messages.value.push({ role: 'assistant', content: streamingContent.value })
+          }
+          streamingContent.value = null
+          toolHint.value = ''
+
+        } else if (event.type === 'error') {
+          messages.value.push({ role: 'assistant', content: `抱歉，出现错误：${event.message}` })
+          streamingContent.value = null
+          toolHint.value = ''
+        }
+      }
+    }
   } catch (err) {
+    streamingContent.value = null
+    toolHint.value = ''
     messages.value.push({
       role: 'assistant',
       content: `抱歉，出现了一些问题：${err.message}`,
     })
   } finally {
     loading.value = false
+    streamingContent.value = null
     scrollToBottom()
   }
 }
@@ -157,6 +215,9 @@ async function resetChat() {
   }
   messages.value = []
   sessionId.value = null
+  loading.value = false
+  streamingContent.value = null
+  toolHint.value = ''
 }
 </script>
 
@@ -407,6 +468,20 @@ async function resetChat() {
 .reset-btn:active {
   background: #f0f2ff;
   border-color: #667eea;
+}
+
+/* 工具调用提示 */
+.tool-hint {
+  text-align: center;
+  font-size: 12px;
+  color: #999;
+  padding: 4px 0 8px;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* 桌面端 hover */

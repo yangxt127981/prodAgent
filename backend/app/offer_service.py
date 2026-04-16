@@ -5,13 +5,14 @@ import httpx
 
 OFFER_API_BASE = "https://zsxp.meione.cc/services/selection/api/show-schedule-offers/offer-code"
 
-SALES_STATUS_MAP = {
-    "SpotOffer": "现货在售",
-    "Purchase": "预购商品",
+SHOW_SCENE_MAP = {
+    "Austin": "佳琦场",
+    "AssistantShow": "助播场",
+    "Link": "挂链接",
 }
 
 LIVE_ROOM_MAP = {
-    "ZB": "最佳福直播间",
+    "ZB": "李佳琦直播间",
     "SY2": "时尚女生直播间",
     "SYC": "时尚女生的衣橱",
     "SXF": "时尚姐姐的衣橱",
@@ -49,14 +50,13 @@ def fetch_offer_schedule(offer_code: str, auth_token: str) -> str:
         lines = []
         for item in data:
             show_date = (item.get("showDate") or "")[:10] or "未知"
-            sales_status = SALES_STATUS_MAP.get(item.get("salesStatus", ""), item.get("salesStatus", "未知"))
             live_room = LIVE_ROOM_MAP.get(item.get("liveRoom", ""), item.get("liveRoom", "未知"))
-            show_scene = item.get("showScene") or "未知"
+            show_scene_raw = item.get("showScene") or ""
+            show_scene = SHOW_SCENE_MAP.get(show_scene_raw, show_scene_raw) or "未知"
             topic = item.get("topicName") or ""
             lines.append(
                 f"直播日期：{show_date} | 直播间：{live_room} | 场次：{show_scene}"
                 + (f" | 专题：{topic}" if topic else "")
-                + f" | 状态：{sales_status}"
             )
         return "\n".join(lines)
 
