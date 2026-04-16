@@ -18,17 +18,22 @@ app = FastAPI(title="商品购买咨询 Agent", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-api_key = os.getenv("ANTHROPIC_API_KEY", "")
+api_key = os.getenv("LLM_API_KEY", "")
+base_url = os.getenv("LLM_BASE_URL", "")
+model = os.getenv("LLM_MODEL", "qwen-max")
+offer_api_token = os.getenv("OFFER_API_TOKEN", "")
 if not api_key:
-    print("⚠️  警告: 未设置 ANTHROPIC_API_KEY 环境变量")
+    print("⚠️  警告: 未设置 LLM_API_KEY 环境变量")
+if not offer_api_token:
+    print("⚠️  警告: 未设置 OFFER_API_TOKEN，排期功能不可用")
 
-agent = ConsultantAgent(api_key=api_key)
+agent = ConsultantAgent(api_key=api_key, base_url=base_url, model=model, offer_api_token=offer_api_token)
 
 
 class ChatRequest(BaseModel):
